@@ -1,4 +1,4 @@
-const { parseJielong, toMindmap } = require('../../utils/parser.js')
+const { parseJielong, toWBS } = require('../../utils/parser.js')
 const { buildUrl } = require('../../utils/plantumlEncoder.js')
 
 const DEMO_TEXT = `丁跑营接龙
@@ -95,7 +95,7 @@ Page({
         return
       }
 
-      const pumlText = toMindmap(parsed)
+      const pumlText = toWBS(parsed)
       const imageUrl = buildUrl(this.data.server, 'svg', pumlText)
 
       this.setData({
