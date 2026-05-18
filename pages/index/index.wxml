@@ -1,0 +1,75 @@
+<view class="container">
+
+  <view class="card">
+    <view class="card-title">
+      <text>📋 粘贴接龙内容</text>
+      <text class="hint">{{lineCount}} 行</text>
+    </view>
+    <textarea
+      class="input-area"
+      placeholder="把接龙内容整段粘贴到这里，例如：&#10;1. 小冯 A组&#10;2. 阿权 D&#10;3. 笑波 慢跑"
+      value="{{inputText}}"
+      bindinput="onInput"
+      maxlength="-1"
+      auto-height="{{false}}"
+      show-confirm-bar="{{false}}"
+      cursor-spacing="20"
+    />
+    <view class="btn-row">
+      <button class="btn ghost" size="mini" bindtap="onPaste">粘贴剪贴板</button>
+      <button class="btn ghost" size="mini" bindtap="onLoadDemo">载入示例</button>
+      <button class="btn ghost" size="mini" bindtap="onClear">清空</button>
+      <button class="btn primary" size="mini" bindtap="onGenerate" loading="{{loading}}">生成图</button>
+    </view>
+  </view>
+
+  <view class="card" wx:if="{{parsed}}">
+    <view class="card-title">
+      <text>📊 分组预览</text>
+      <text class="hint">共 {{parsed.total}} 人 · {{parsed.groups.length}} 组</text>
+    </view>
+    <view class="group-list">
+      <view class="group-item" wx:for="{{parsed.groups}}" wx:key="key">
+        <view class="group-head">
+          <text class="group-label">{{item.label}}</text>
+          <text class="group-count">{{item.members.length}}人</text>
+        </view>
+        <view class="members">
+          <text class="member" wx:for="{{item.members}}" wx:for-item="m" wx:key="name">{{m.name}}</text>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <view class="card" wx:if="{{imageUrl}}">
+    <view class="card-title">
+      <text>🖼 思维导图</text>
+      <text class="hint" bindtap="onCopyUrl">复制链接</text>
+    </view>
+    <scroll-view class="image-wrap" scroll-x="{{true}}" scroll-y="{{true}}" enhanced="{{true}}" show-scrollbar="{{false}}">
+      <image
+        class="result-image"
+        src="{{imageUrl}}"
+        mode="widthFix"
+        bindtap="onPreviewImage"
+        binderror="onImageError"
+        show-menu-by-longpress="{{true}}"
+      />
+    </scroll-view>
+    <view class="btn-row">
+      <button class="btn primary" size="mini" bindtap="onSaveImage">保存到相册</button>
+      <button class="btn ghost" size="mini" bindtap="onCopyPuml">复制PlantUML</button>
+    </view>
+  </view>
+
+  <view class="card" wx:if="{{pumlText}}">
+    <view class="card-title">
+      <text>📝 PlantUML 源码</text>
+      <text class="hint">{{pumlText.length}} 字符</text>
+    </view>
+    <view class="code-box">
+      <text selectable="{{true}}" user-select="{{true}}">{{pumlText}}</text>
+    </view>
+  </view>
+
+</view>

@@ -1,0 +1,13 @@
+# 微信开发者工具
+.DS_Store
+miniprogram_npm/
+node_modules/
+*.log
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# 用户私有配置
+project.private.config.json
