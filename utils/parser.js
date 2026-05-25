@@ -30,6 +30,104 @@ GROUP_RULES.forEach(r => { GROUP_KEY_MAP[r.key] = r.label })
 
 const OTHER_LABEL = '其他'
 const FOLLOW_PENDING = '__follow__'   // 待解析占位符
+const LEGEND_MAX_CJK_WIDTH = 20
+
+function isMemberLine(line) {
+  return /^\s*\d+\s*[\.、\)．]/.test(line)
+}
+
+function normalizeTitleLine(line) {
+  return cleanName(String(line || '').replace(/^[#＃]+\s*/, '').trim())
+}
+
+/**
+ * 提取接龙头部信息（成员清单之前）：
+ * - 标题
+ * - 课程内容简介
+ * - 分组说明（A/B/C/D...）
+ */
+function extractHeaderMeta(lines) {
+  const firstMemberIndex = lines.findIndex(isMemberLine)
+  const headerLines = (firstMemberIndex === -1 ? lines : lines.slice(0, firstMemberIndex))
+    .map(l => String(l || '').trim())
+    .filter(Boolean)
+
+  if (!headerLines.length) {
+    return {
+      headerTitle: '',
+      introLines: [],
+      introText: '',
+      groupBriefs: []
+    }
+  }
+
+  const headerTitle = normalizeTitleLine(headerLines[0])
+  const introLines = []
+  const groupBriefMap = {}
+  const groupBriefOrder = []
+  let currentGroupKey = null
+
+  const pushGroupBrief = (key, desc) => {
+    const text = cleanName(desc)
+    if (!text) return
+    if (!groupBriefMap[key]) {
+      groupBriefMap[key] = text
+      groupBriefOrder.push(key)
+    } else {
+      groupBriefMap[key] += `；${text}`
+    }
+  }
+
+  for (let i = 0; i < headerLines.length; i++) {
+    const raw = headerLines[i]
+    const line = cleanName(raw)
+    if (!line) continue
+
+    if (i === 0 && normalizeTitleLine(raw) === headerTitle) {
+      currentGroupKey = null
+      continue
+    }
+
+    // 兼容多种写法：A组 8公里... / A组:8公里... / A 8公里... / A组8公里...
+    const groupMatch = line.match(/^([A-Fa-f])\s*组?\s*(?:[：:\-]\s*)?(.+)$/)
+    if (groupMatch) {
+      currentGroupKey = groupMatch[1].toUpperCase()
+      pushGroupBrief(currentGroupKey, groupMatch[2])
+      continue
+    }
+
+    if (/^(其余|其他).*(慢跑|放松|轻松)|^(慢跑|放松|轻松)/.test(line)) {
+      currentGroupKey = 'slow'
+      pushGroupBrief(currentGroupKey, line)
+      continue
+    }
+
+    // 紧跟在分组行后的非空行视作该组补充说明（如 400 米配速）
+    if (currentGroupKey && !/^([A-Fa-f])\s*组?/.test(line)) {
+      pushGroupBrief(currentGroupKey, line)
+      continue
+    }
+
+    currentGroupKey = null
+    introLines.push(line)
+  }
+
+  const rank = { A: 1, B: 2, C: 3, D: 4, E: 5, F: 6, slow: 7 }
+  groupBriefOrder.sort((a, b) => (rank[a] || 99) - (rank[b] || 99))
+
+  const groupBriefs = groupBriefOrder.map(key => ({
+    key,
+    label: GROUP_KEY_MAP[key] || (key === 'slow' ? '慢跑组' : key),
+    desc: groupBriefMap[key]
+  }))
+
+  return {
+    headerTitle,
+    introLines,
+    introText: introLines.join('；'),
+    groupBriefs
+  }
+}
 
 /**
  * 精确+模糊识别组别，返回 groupKey 或 OTHER_LABEL
@@ -161,16 +259,7 @@ function parseLine(rawLine) {
 function parseJielong(text, options = {}) {
   const title = (options.title || '接龙分组').trim()
   const lines = String(text || '').split(/\r?\n/)
-
-  // 提取首行可能的标题（非数字开头的有意义文本）
-  let detectedTitle = ''
-  for (const line of lines) {
-    const t = line.trim()
-    if (!t) continue
-    if (/^\s*\d+\s*[\.、\)．]/.test(t)) break
-    detectedTitle = cleanName(t) || t
-    break
-  }
+  const headerMeta = extractHeaderMeta(lines)
 
   // ── 第一阶段：基础解析 ───────────────────────────────────────────────
   const parsed = lines.map(parseLine).filter(Boolean)
@@ -240,16 +329,19 @@ function parseJielong(text, options = {}) {
   const groups = groupOrder.map(k => groupMap[k])
 
   return {
-    title: detectedTitle || title,
+    title: headerMeta.headerTitle || title,
     groups,
-    total: parsed.length
+    total: parsed.length,
+    introText: headerMeta.introText,
+    introLines: headerMeta.introLines,
+    groupBriefs: headerMeta.groupBriefs
   }
 }
 
 /**
  * 生成 PlantUML WBS 图
  */
-function toWBS(parsed) {
+function toWBS(parsed, options = {}) {
   const lines = ['@startwbs']
   lines.push('<style>')
   lines.push('wbsDiagram {')
@@ -261,8 +353,9 @@ function toWBS(parsed) {
   lines.push('}')
   lines.push('</style>')
 
-  lines.push(`* ${escapeText(parsed.title)}\\n共${parsed.total}人 <<root>>`)
+  lines.push(`* ${escapeText(parsed.title)} (共${parsed.total}人) <<root>>`)
 
+  // 成员分组
   for (const g of parsed.groups) {
     const style = g.key === 'slow' ? 'slow' : (g.key === OTHER_LABEL ? 'other' : 'group')
     lines.push(`** ${escapeText(g.label)} (${g.members.length}人) <<${style}>>`)
@@ -272,8 +365,80 @@ function toWBS(parsed) {
     }
   }
 
+  const wrappedLegendLines = getWrappedLegendLines(parsed, LEGEND_MAX_CJK_WIDTH)
+  if (options.includeLegend && wrappedLegendLines.length) {
+    lines.push('legend left')
+    wrappedLegendLines.forEach(line => lines.push(escapeText(line)))
+    lines.push('endlegend')
+  }
+
   lines.push('@endwbs')
   return lines.join('\n')
+}
+
+function buildLegendLines(parsed) {
+  const out = []
+
+  ;(parsed.introLines || []).forEach(line => {
+    const text = String(line || '').trim()
+    if (text) out.push(text)
+  })
+
+  const briefs = parsed.groupBriefs || []
+  if (briefs.length) {
+    if (out.length) out.push('')
+    briefs.forEach(brief => {
+      const parts = String(brief.desc || '').split('；').map(s => s.trim()).filter(Boolean)
+      if (!parts.length) return
+      out.push(`${brief.label}  ${parts[0]}`)
+      for (let i = 1; i < parts.length; i++) {
+        out.push(parts[i])
+      }
+    })
+  }
+
+  return out
+}
+
+function getWrappedLegendLines(parsed, maxWidth = LEGEND_MAX_CJK_WIDTH) {
+  return wrapLegendLines(buildLegendLines(parsed), maxWidth)
+}
+
+function wrapLegendLines(lines, maxWidth) {
+  const out = []
+  ;(lines || []).forEach(line => {
+    if (!line) {
+      out.push('')
+      return
+    }
+    out.push(...wrapLineByCjkWidth(String(line), maxWidth))
+  })
+  return out
+}
+
+function wrapLineByCjkWidth(line, maxWidth) {
+  const out = []
+  let current = ''
+  let width = 0
+
+  for (const ch of line) {
+    const w = getCjkAwareWidth(ch)
+    if (current && width + w > maxWidth) {
+      out.push(current)
+      current = ch
+      width = w
+    } else {
+      current += ch
+      width += w
+    }
+  }
+
+  if (current) out.push(current)
+  return out.length ? out : ['']
+}
+
+function getCjkAwareWidth(ch) {
+  return /[\u2E80-\u9FFF\uF900-\uFAFF\uFF00-\uFFEF]/.test(ch) ? 1 : 0.5
 }
 
 function escapeText(s) {
@@ -282,5 +447,6 @@ function escapeText(s) {
 
 module.exports = {
   parseJielong,
-  toWBS
+  toWBS,
+  getWrappedLegendLines
 }

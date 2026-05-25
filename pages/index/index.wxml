@@ -1,5 +1,11 @@
 <view class="container">
 
+  <canvas
+    type="2d"
+    id="composeCanvas"
+    class="compose-canvas"
+  />
+
   <view class="card">
     <view class="card-title">
       <text>📋 粘贴接龙内容</text>
@@ -69,6 +75,17 @@
     </view>
     <view class="code-box">
       <text selectable="{{true}}" user-select="{{true}}">{{pumlText}}</text>
+    </view>
+  </view>
+
+  <view class="card" wx:if="{{debugEnabled}}">
+    <view class="card-title">
+      <text>🐞 调试日志</text>
+      <text class="hint">{{debugVersion}}</text>
+    </view>
+    <view class="debug-box">
+      <text class="debug-line" wx:for="{{debugLines}}" wx:key="*this">{{item}}</text>
+      <text class="debug-empty" wx:if="{{!debugLines.length}}">点击“生成图”后这里会显示合成坐标与输出路径</text>
     </view>
   </view>
 

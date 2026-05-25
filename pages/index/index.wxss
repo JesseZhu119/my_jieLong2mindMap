@@ -6,6 +6,17 @@
   box-shadow: 0 4rpx 16rpx rgba(0, 0, 0, 0.04);
 }
 
+.compose-canvas {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 750rpx;
+  height: 750rpx;
+  opacity: 0;
+  pointer-events: none;
+  z-index: -1;
+}
+
 .card-title {
   display: flex;
   align-items: center;
@@ -77,9 +88,10 @@
 
 .group-head {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   margin-bottom: 12rpx;
+  gap: 16rpx;
 }
 
 .group-label {
@@ -94,6 +106,22 @@
   background: rgba(52, 152, 219, 0.1);
   padding: 4rpx 16rpx;
   border-radius: 20rpx;
+}
+
+.group-summary {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8rpx;
+}
+
+.group-brief {
+  display: block;
+  max-width: 420rpx;
+  font-size: 22rpx;
+  line-height: 1.5;
+  color: #6c757d;
+  text-align: right;
 }
 
 .members {
@@ -137,4 +165,29 @@
   overflow: auto;
   word-break: break-all;
   white-space: pre-wrap;
+}
+
+.debug-box {
+  background: #111827;
+  border-radius: 12rpx;
+  padding: 16rpx;
+  max-height: 360rpx;
+  overflow: auto;
+}
+
+.debug-line {
+  display: block;
+  font-family: Menlo, Consolas, monospace;
+  font-size: 20rpx;
+  line-height: 1.5;
+  color: #d1d5db;
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin-bottom: 6rpx;
+}
+
+.debug-empty {
+  display: block;
+  font-size: 22rpx;
+  color: #9ca3af;
 }
