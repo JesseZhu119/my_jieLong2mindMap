@@ -43,7 +43,7 @@
 
   <view class="card" wx:if="{{imageUrl}}">
     <view class="card-title">
-      <text>🖼 思维导图</text>
+      <text>🖼 WBS图</text>
       <text class="hint" bindtap="onCopyUrl">复制链接</text>
     </view>
     <scroll-view class="image-wrap" scroll-x="{{true}}" scroll-y="{{true}}" enhanced="{{true}}" show-scrollbar="{{false}}">

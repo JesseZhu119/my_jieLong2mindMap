@@ -1,6 +1,6 @@
-# 接龙转思维导图小程序
+# 接龙转WBS图小程序
 
-把微信群里的接龙文本一键转换成 PlantUML 思维导图。
+把微信群里的接龙文本一键转换成 PlantUML WBS 图。
 
 ## 功能
 
@@ -24,7 +24,7 @@ jielong2mindmap/
 │       ├── index.wxss
 │       └── index.json
 └── utils/
-    ├── parser.js                  # 接龙文本解析 + mindmap 生成
+    ├── parser.js                  # 接龙文本解析 + WBS 生成
     └── plantumlEncoder.js         # PlantUML HEX 编码
 ```
 
@@ -69,4 +69,4 @@ https://www.plantuml.com/plantuml/svg/~h{HEX_OF_UTF8_BYTES}
 
 - 自建 PlantUML 服务器替换 `app.js` 中的 `plantumlServer` 字段
 - 在 `parser.js` 的 `DEFAULT_GROUP_RULES` 中增加更多分组关键词
-- 把 `toMindmap` 替换为 `toWBS` 即可输出 WBS 图
+- 默认使用 `toWBS` 输出 WBS 图
