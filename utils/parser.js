@@ -7,12 +7,15 @@
  *  1. 精确关键词匹配（含"慢跑/放松/轻松"）
  *  2. 重复同字母匹配：DD / DDD → D
  *  3. 范围写法取首字母：A→C / B-D / A~C → A
- *  4. 孤立单字母：内容里找到唯一的 A-F 字母
+ *  4. 孤立单字母：内容里找到唯一的 A-D 字母
  *
  * "跟上/跟住 xx" 二阶段策略：
  *  第一阶段：提取被跟随人的名字，标记为待解析
  *  第二阶段：所有行解析完毕后，按名字索引查找被跟随者的分组并回填
+ *            若原名未命中，再尝试“别称 -> 主名”映射
  */
+
+const { buildAliasToCanonicalMap } = require('./nameAliases.js')
 
 // 精确关键词规则
 const GROUP_RULES = [
@@ -20,15 +23,14 @@ const GROUP_RULES = [
   { key: 'B',    label: 'B组' },
   { key: 'C',    label: 'C组' },
   { key: 'D',    label: 'D组' },
-  { key: 'E',    label: 'E组' },
-  { key: 'F',    label: 'F组' },
   { key: 'slow', label: '慢跑组' }
 ]
 
 const GROUP_KEY_MAP = {}
 GROUP_RULES.forEach(r => { GROUP_KEY_MAP[r.key] = r.label })
 
-const OTHER_LABEL = '其他'
+const UNKNOWN_GROUP_KEY = '__unknown__'
+const FALLBACK_GROUP_KEY = 'slow'
 const FOLLOW_PENDING = '__follow__'   // 待解析占位符
 const LEGEND_MAX_CJK_WIDTH = 20
 
@@ -89,7 +91,7 @@ function extractHeaderMeta(lines) {
     }
 
     // 兼容多种写法：A组 8公里... / A组:8公里... / A 8公里... / A组8公里...
-    const groupMatch = line.match(/^([A-Fa-f])\s*组?\s*(?:[：:\-]\s*)?(.+)$/)
+    const groupMatch = line.match(/^([A-Da-d])\s*组?\s*(?:[：:\-]\s*)?(.+)$/)
     if (groupMatch) {
       currentGroupKey = groupMatch[1].toUpperCase()
       pushGroupBrief(currentGroupKey, groupMatch[2])
@@ -103,7 +105,7 @@ function extractHeaderMeta(lines) {
     }
 
     // 紧跟在分组行后的非空行视作该组补充说明（如 400 米配速）
-    if (currentGroupKey && !/^([A-Fa-f])\s*组?/.test(line)) {
+    if (currentGroupKey && !/^([A-Da-d])\s*组?/.test(line)) {
       pushGroupBrief(currentGroupKey, line)
       continue
     }
@@ -112,7 +114,7 @@ function extractHeaderMeta(lines) {
     introLines.push(line)
   }
 
-  const rank = { A: 1, B: 2, C: 3, D: 4, E: 5, F: 6, slow: 7 }
+  const rank = { A: 1, B: 2, C: 3, D: 4, slow: 5 }
   groupBriefOrder.sort((a, b) => (rank[a] || 99) - (rank[b] || 99))
 
   const groupBriefs = groupBriefOrder.map(key => ({
@@ -130,7 +132,7 @@ function extractHeaderMeta(lines) {
 }
 
 /**
- * 精确+模糊识别组别，返回 groupKey 或 OTHER_LABEL
+ * 精确+模糊识别组别，返回 groupKey 或 UNKNOWN_GROUP_KEY
  */
 function detectGroup(content) {
   const s = content.toUpperCase()
@@ -140,14 +142,14 @@ function detectGroup(content) {
 
   // 2. 精确单字母 + "组" 可选：A组 / A 组 / A
   //    用边界判断，防止误匹配 "starl-魏"
-  for (const key of ['A','B','C','D','E','F']) {
+  for (const key of ['A', 'B', 'C', 'D']) {
     // 单独的 X 或 X组（X 前后不是其他字母）
     if (new RegExp('(?<![A-Z])' + key + '{1}(?:组)?(?![A-Z])', 'i').test(s)) {
       return key
     }
   }
 
-  return OTHER_LABEL
+  return UNKNOWN_GROUP_KEY
 }
 
 /**
@@ -159,22 +161,22 @@ function detectGroup(content) {
 function fuzzyDetectGroup(content) {
   // 1. 先走精确路径
   const exact = detectGroup(content)
-  if (exact !== OTHER_LABEL) return exact
+  if (exact !== UNKNOWN_GROUP_KEY) return exact
 
   const s = content.toUpperCase()
 
   // 2. 重复字母：DD / DDD / Ddd → D
-  const repeatMatch = s.match(/(?<![A-Z])([A-F])\1+(?![A-Z])/)
+  const repeatMatch = s.match(/(?<![A-Z])([A-D])\1+(?![A-Z])/)
   if (repeatMatch) return repeatMatch[1]
 
   // 3. 范围写法取首字母：A→C / A-C / A~C / A—C / A to C
-  const rangeMatch = s.match(/(?<![A-Z])([A-F])[\s]*(?:→|->|—|-|~|TO)[\s]*[A-F](?![A-Z])/)
+  const rangeMatch = s.match(/(?<![A-Z])([A-D])[\s]*(?:→|->|—|-|~|TO)[\s]*[A-D](?![A-Z])/)
   if (rangeMatch) return rangeMatch[1]
 
   // 4. 慢跑/放松/轻松 (重复保险)
   if (/慢跑|放松|轻松/.test(content)) return 'slow'
 
-  return OTHER_LABEL
+  return UNKNOWN_GROUP_KEY
 }
 
 /**
@@ -226,19 +228,19 @@ function parseLine(rawLine) {
 
   // 检测"跟上xx"引用（仅在无明确分组时生效）
   let followRef = null
-  if (groupKey === OTHER_LABEL) {
+  if (groupKey === UNKNOWN_GROUP_KEY) {
     followRef = detectFollow(content)
     if (followRef) groupKey = FOLLOW_PENDING
   }
 
   // 清理备注中的纯分组标记
   const noteStripped = note
-    .replace(/^[A-Fa-f]{1,3}\s*组?$/, '')
+    .replace(/^[A-Da-d]{1,3}\s*组?$/, '')
     .replace(/^慢跑$|^放松$|^轻松$/, '')
-    .replace(/^[A-Fa-f]\s*[\-—→~to]+\s*[A-Fa-f]\s*组?$/i, '')
+    .replace(/^[A-Da-d]\s*[\-—→~to]+\s*[A-Da-d]\s*组?$/i, '')
     .trim()
   note = note
-    .replace(/^[A-Fa-f]{1,3}\s*组?\s*/i, '')
+    .replace(/^[A-Da-d]{1,3}\s*组?\s*/i, '')
     .replace(/^慢跑\s*|^放松\s*|^轻松\s*/, '')
     .trim()
   if (!noteStripped) note = ''
@@ -248,7 +250,7 @@ function parseLine(rawLine) {
     name: cleanName(name) || name,
     note: cleanName(note),
     groupKey,
-    groupLabel: GROUP_KEY_MAP[groupKey] || (groupKey === FOLLOW_PENDING ? FOLLOW_PENDING : OTHER_LABEL),
+    groupLabel: GROUP_KEY_MAP[groupKey] || (groupKey === FOLLOW_PENDING ? FOLLOW_PENDING : GROUP_KEY_MAP[FALLBACK_GROUP_KEY]),
     followRef   // 被跟随者的名字片段（待第二阶段解析）
   }
 }
@@ -267,35 +269,53 @@ function parseJielong(text, options = {}) {
   // 建立"昵称 → groupKey"索引（用于第二阶段查找）
   const nameGroupIndex = {}
   for (const item of parsed) {
-    if (item.groupKey !== FOLLOW_PENDING && item.groupKey !== OTHER_LABEL) {
+    if (item.groupKey !== FOLLOW_PENDING && item.groupKey !== UNKNOWN_GROUP_KEY) {
       nameGroupIndex[item.name] = item.groupKey
     }
   }
+  const knownNames = Object.keys(nameGroupIndex)
+  const aliasToCanonical = buildAliasToCanonicalMap(knownNames)
 
   // ── 第二阶段：解析"跟上xx"引用 ──────────────────────────────────────
   for (const item of parsed) {
     if (item.groupKey !== FOLLOW_PENDING) continue
 
     const ref = item.followRef
-    if (!ref) { item.groupKey = OTHER_LABEL; continue }
+    if (!ref) {
+      item.groupKey = FALLBACK_GROUP_KEY
+      item.groupLabel = GROUP_KEY_MAP[FALLBACK_GROUP_KEY]
+      continue
+    }
 
-    const knownNames = Object.keys(nameGroupIndex)
+    const refCandidates = [ref]
+    const canonicalByAlias = aliasToCanonical[ref]
+    if (canonicalByAlias && !refCandidates.includes(canonicalByAlias)) {
+      refCandidates.push(canonicalByAlias)
+    }
 
     // 策略1：子串包含（ref 包含在名字里，或名字包含在 ref 里）
     let found = null
-    for (const n of knownNames) {
-      if (n.includes(ref) || ref.includes(n)) { found = nameGroupIndex[n]; break }
+    for (const candidate of refCandidates) {
+      for (const n of knownNames) {
+        if (n.includes(candidate) || candidate.includes(n)) {
+          found = nameGroupIndex[n]
+          break
+        }
+      }
+      if (found) break
     }
 
     // 策略2：按字符匹配得分（取得分最高的名字）
     if (!found) {
       let bestScore = 0
-      for (const n of knownNames) {
-        let score = 0
-        for (const ch of ref) {
-          if (/[\u4e00-\u9fa5]/.test(ch) && n.includes(ch)) score++
+      for (const candidate of refCandidates) {
+        for (const n of knownNames) {
+          let score = 0
+          for (const ch of candidate) {
+            if (/[\u4e00-\u9fa5]/.test(ch) && n.includes(ch)) score++
+          }
+          if (score > bestScore) { bestScore = score; found = nameGroupIndex[n] }
         }
-        if (score > bestScore) { bestScore = score; found = nameGroupIndex[n] }
       }
       if (bestScore === 0) found = null
     }
@@ -304,8 +324,16 @@ function parseJielong(text, options = {}) {
       item.groupKey = found
       item.groupLabel = GROUP_KEY_MAP[found]
     } else {
-      item.groupKey = OTHER_LABEL
-      item.groupLabel = OTHER_LABEL
+      item.groupKey = FALLBACK_GROUP_KEY
+      item.groupLabel = GROUP_KEY_MAP[FALLBACK_GROUP_KEY]
+    }
+  }
+
+  // 未识别到 A/B/C/D/慢跑 的条目，统一归到慢跑组
+  for (const item of parsed) {
+    if (item.groupKey === UNKNOWN_GROUP_KEY) {
+      item.groupKey = FALLBACK_GROUP_KEY
+      item.groupLabel = GROUP_KEY_MAP[FALLBACK_GROUP_KEY]
     }
   }
 
@@ -314,7 +342,7 @@ function parseJielong(text, options = {}) {
   const groupMap = {}
   for (const item of parsed) {
     const key = item.groupKey
-    const label = GROUP_KEY_MAP[key] || OTHER_LABEL
+    const label = GROUP_KEY_MAP[key] || GROUP_KEY_MAP[FALLBACK_GROUP_KEY]
     if (!groupMap[key]) {
       groupMap[key] = { key, label, members: [] }
       groupOrder.push(key)
@@ -322,8 +350,8 @@ function parseJielong(text, options = {}) {
     groupMap[key].members.push({ name: item.name, note: item.note })
   }
 
-  // 排序：A B C D E F 慢跑 其他
-  const orderRank = { A: 1, B: 2, C: 3, D: 4, E: 5, F: 6, slow: 7, [OTHER_LABEL]: 8 }
+  // 排序：A B C D 慢跑
+  const orderRank = { A: 1, B: 2, C: 3, D: 4, slow: 5 }
   groupOrder.sort((a, b) => (orderRank[a] || 99) - (orderRank[b] || 99))
 
   const groups = groupOrder.map(k => groupMap[k])
@@ -357,7 +385,7 @@ function toWBS(parsed, options = {}) {
 
   // 成员分组
   for (const g of parsed.groups) {
-    const style = g.key === 'slow' ? 'slow' : (g.key === OTHER_LABEL ? 'other' : 'group')
+    const style = g.key === 'slow' ? 'slow' : 'group'
     lines.push(`** ${escapeText(g.label)} (${g.members.length}人) <<${style}>>`)
     for (const m of g.members) {
       const display = m.note ? `${escapeText(m.name)}\\n${escapeText(m.note)}` : escapeText(m.name)
