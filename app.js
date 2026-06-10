@@ -3,21 +3,33 @@ App({
     this.checkMiniProgramUpdate()
   },
 
-  onShow() {
-    // 从后台回到前台时再查一次：用户可能在使用时后台已下好新版本
-    this.checkMiniProgramUpdate()
-  },
-
   /**
    * 检查并应用小程序新版本（微信客户端在后台拉包，与业务服务器无关）。
    * 发布流程：微信公众平台上传代码 → 提交审核 → 发布；用户侧需重启小程序才生效。
+   *
+   * 说明：
+   * - 监听器只绑定一次，避免 onShow 重复注册在部分机型上引发异常。
+   * - 开发者工具（envVersion === 'develop'）里 getUpdateManager 常出现 timeout 等内部错误，
+   *   与真机体验无关，故在 develop 下跳过。
    */
   checkMiniProgramUpdate() {
     if (!wx.canIUse('getUpdateManager')) {
       return
     }
+    try {
+      const { miniProgram } = wx.getAccountInfoSync()
+      if (miniProgram.envVersion === 'develop') {
+        return
+      }
+    } catch (e) {
+      // getAccountInfoSync 不可用时仍尝试绑定（真机一般可用）
+    }
+    if (this._updateManagerHooksBound) {
+      return
+    }
+    this._updateManagerHooksBound = true
+
     const updateManager = wx.getUpdateManager()
-    updateManager.onCheckForUpdate(() => {})
     updateManager.onUpdateReady(() => {
       wx.showModal({
         title: '发现新版本',
