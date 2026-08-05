@@ -73,6 +73,146 @@
   border: none !important;
 }
 
+.date-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+  background: #f8f9fa;
+  border: 2rpx solid #e9ecef;
+  border-radius: 12rpx;
+  padding: 14rpx 16rpx;
+}
+
+.date-label {
+  font-size: 24rpx;
+  color: #2c3e50;
+  font-weight: 600;
+}
+
+.date-value {
+  min-width: 220rpx;
+  text-align: right;
+  font-size: 24rpx;
+  color: #3498db;
+  font-weight: 600;
+}
+
+.hint-block {
+  margin-top: 14rpx;
+  color: #6c757d;
+  font-size: 22rpx;
+  line-height: 1.5;
+}
+
+.attendance-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12rpx;
+  font-size: 24rpx;
+  color: #495057;
+}
+
+.attendance-absent {
+  color: #b02a37;
+}
+
+.attendance-list {
+  max-height: 520rpx;
+  overflow: auto;
+  border: 2rpx solid #e9ecef;
+  border-radius: 12rpx;
+  background: #fff;
+}
+
+.attendance-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12rpx 16rpx;
+  border-bottom: 1rpx solid #eef1f4;
+}
+
+.attendance-item:last-child {
+  border-bottom: none;
+}
+
+.attendance-name {
+  font-size: 24rpx;
+  color: #2c3e50;
+}
+
+.attendance-tag {
+  font-size: 22rpx;
+  padding: 4rpx 14rpx;
+  border-radius: 18rpx;
+  border: 2rpx solid transparent;
+}
+
+.attendance-tag.present {
+  color: #166534;
+  background: #dcfce7;
+  border-color: #86efac;
+}
+
+.attendance-tag.absent {
+  color: #9f1239;
+  background: #ffe4e6;
+  border-color: #fda4af;
+}
+
+.unmatched-box {
+  margin-top: 12rpx;
+  background: #fff8e1;
+  border: 2rpx solid #ffe08a;
+  border-radius: 10rpx;
+  padding: 12rpx;
+}
+
+.unmatched-title {
+  display: block;
+  font-size: 22rpx;
+  color: #8a5a00;
+  margin-bottom: 6rpx;
+}
+
+.unmatched-text {
+  display: block;
+  font-size: 22rpx;
+  color: #6f4a00;
+  line-height: 1.5;
+}
+
+.pacer-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14rpx;
+}
+
+.pacer-item {
+  background: #f8f9fa;
+  border: 2rpx solid #e9ecef;
+  border-radius: 12rpx;
+  padding: 14rpx;
+}
+
+.pacer-label {
+  display: block;
+  font-size: 24rpx;
+  color: #2c3e50;
+  font-weight: 600;
+  margin-bottom: 8rpx;
+}
+
+.pacer-input {
+  width: 100%;
+  height: 64rpx;
+  line-height: 64rpx;
+  font-size: 24rpx;
+  color: #495057;
+}
+
 .group-list {
   display: flex;
   flex-direction: column;
@@ -138,6 +278,13 @@
   padding: 6rpx 16rpx;
   border-radius: 20rpx;
   border: 2rpx solid #e9ecef;
+}
+
+.member-pacer {
+  background: #ffe58f;
+  border-color: #f2c94c;
+  color: #5f4b00;
+  font-weight: 600;
 }
 
 .image-wrap {

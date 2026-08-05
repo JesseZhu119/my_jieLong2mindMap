@@ -1,51 +1,76 @@
 const { parseJielong, toWBS, getWrappedLegendLines } = require('../../utils/parser.js')
 const { buildUrl } = require('../../utils/plantumlEncoder.js')
+const { DEFAULT_MEMBER_ROSTER, loadMemberRosterPreferTxt } = require('../../utils/memberRoster.js')
+const {
+  normalizeDate,
+  buildAttendanceRows,
+  buildActivityCsv,
+  buildMergedCsv,
+  buildActivityExcelHtml,
+  buildMergedExcelHtml
+} = require('../../utils/attendance.js')
 const LOGO_PATH = '/dingpaoying.jpg'
 const DEBUG_VERSION = 'logo-debug-v2'
 const LEGEND_MAX_CJK_WIDTH = 20
 const ARTIFACT_TMP_DIR = `${wx.env.USER_DATA_PATH}/tmp`
+const EXPORT_TMP_DIR = `${wx.env.USER_DATA_PATH}/exports`
+const ATTENDANCE_HISTORY_KEY = 'attendance_history_v1'
 
 const DEMO_TEXT = `丁跑营接龙
-#接龙  本周强度课
-8公里节奏+8组400米间歇+4组100米冲刺（节奏休息5分钟，400米组间休息60秒，间歇后休息3分钟+100米冲刺，冲刺组间休息30秒）
+5k+1.2k×？（5公里休息5分钟，1.2组休120秒）
 
-A组  8公里配速350-355
-400米配速320-325
-B组  8公里配速405-410
-400米配速335-340
-C组  8公里配速420-430
-400米配速355-400
-D组  8公里配速440-450
-400米配速410-415
+A组（配速员冯斌）  5公里配速400-410
+1.2公里配速340-345（8组）
+B组（配速员祝剑）  5公里配速415-420
+1.2公里配速350-355（7组）
+C组（配速员丽莎） 5公里配速430-435
+1.2公里配速410-415（6组）
+D组（配速员权哥） 5公里配速440-445
+1.2公里配速420-430（5组）
+禁止超过配速员（除了最后1组），也别跟配速员并排跑，通通只能看着屁股跑
 其余想慢跑的配速随意
 
-1. 小冯先生 A
-2. 罗肖B组
-3. 祝剑 C组
-4. 胡JF C组
-5. 我是～郑婉珍💗 D组8先完成✅
-6. 今年必破130💪 c
-7. 七秒钟的记忆 D组能跑多少跑多少
-8. 大朱朱 B组
-9. 张海波 C组
-10. 岛主 C组
-11. 🐉行者.. D组
-12. 兆方 B组
-13. 菜还得练  C组
-14. 张平
-15. 何东锋 D组
-16. 阿进-菜就多练（罐军授权） B组
-17. 画亼 B组
-18. 阿权 D组
-19. 袁誠 C组
-20. 张利明   惠耳助听器 C组
-21. 雪梅Snowy    C组
-22. 💐毛💫子🍓 D组试试看`
+1. 胡JF B组
+2. 小冯先生 A组（配速员）
+3. 李龙 A
+4. 我是～郑婉珍💗  C组
+5. 七秒钟的记忆 C
+6. 张海波 C
+7. 祝剑 B组（配速员）
+8. 雪梅Snowy B
+9. 袁誠 C
+10. T哥 C
+11. 大朱朱 A
+12. 佳歌 D
+13. 今年必破130 D
+14. lisa C组
+15. 💐毛💫子🍓 D组
+16. 菜还得练 B
+17. 岛主 C
+18. 遇事不要方先生  D
+19. 殷胤 C
+20. 菜强强 争取跟住祝神
+21. 挥挥  D
+22. 忻斌 A组，睡眠好A组。
+23. Summernmz（雪涛)B组
+24. 韩医生B组
+25. 功夫熊猫 B
+26. 阿权 D组
+27. 陈建新🚗  C C C
+28. 翟金洋 D组
+
+`
 
 Page({
   data: {
     inputText: '',
     lineCount: 0,
+    pacerInputs: {
+      A: '',
+      B: '',
+      C: '',
+      D: ''
+    },
     parsed: null,
     pumlText: '',
     imageUrl: '',
@@ -56,12 +81,67 @@ Page({
     debugEnabled: true,
     debugLines: [],
     loading: false,
-    server: 'https://www.plantuml.com/plantuml'
+    server: 'https://www.plantuml.com/plantuml',
+    activityDate: '',
+    attendanceResult: null,
+    historyCount: 0,
+    memberCount: DEFAULT_MEMBER_ROSTER.length,
+    rosterSource: 'builtin'
   },
 
   onLoad() {
+    this.memberRoster = DEFAULT_MEMBER_ROSTER.slice()
     const server = (getApp().globalData && getApp().globalData.plantumlServer) || this.data.server
-    this.setData({ server })
+    this.setData({
+      server,
+      activityDate: this.getTodayDateText(),
+      historyCount: this.getHistoryRecords().length
+    })
+    this.initRosterSource()
+  },
+
+  async initRosterSource() {
+    try {
+      const info = await loadMemberRosterPreferTxt()
+      this.memberRoster = (info.roster || []).slice()
+      this.setData({
+        memberCount: this.memberRoster.length,
+        rosterSource: info.source || 'builtin'
+      })
+      if (info.source === 'txt') {
+        wx.showToast({ title: `已加载TXT名单(${this.memberRoster.length})`, icon: 'none' })
+      }
+      this.debugLog('roster-loaded', {
+        source: info.source,
+        count: this.memberRoster.length,
+        usedPath: info.usedPath,
+        error: info.error
+      })
+    } catch (err) {
+      this.memberRoster = DEFAULT_MEMBER_ROSTER.slice()
+      this.setData({
+        memberCount: this.memberRoster.length,
+        rosterSource: 'builtin'
+      })
+      this.debugLog('roster-load-failed', {
+        message: err && err.message ? err.message : String(err)
+      })
+    }
+  },
+
+  getMemberRoster() {
+    if (Array.isArray(this.memberRoster) && this.memberRoster.length) {
+      return this.memberRoster
+    }
+    return DEFAULT_MEMBER_ROSTER
+  },
+
+  getTodayDateText() {
+    const now = new Date()
+    const yyyy = now.getFullYear()
+    const mm = String(now.getMonth() + 1).padStart(2, '0')
+    const dd = String(now.getDate()).padStart(2, '0')
+    return `${yyyy}-${mm}-${dd}`
   },
 
   onInput(e) {
@@ -92,14 +172,32 @@ Page({
     this.setData({
       inputText: '',
       lineCount: 0,
+      pacerInputs: {
+        A: '',
+        B: '',
+        C: '',
+        D: ''
+      },
       parsed: null,
       pumlText: '',
       imageUrl: '',
       composedImageUrl: '',
       artifactPaths: null,
       rawImageUrl: '',
-      debugLines: []
+      debugLines: [],
+      attendanceResult: null
     })
+  },
+
+  onDateChange(e) {
+    this.setData({ activityDate: e.detail.value || this.getTodayDateText() })
+  },
+
+  onPacerInput(e) {
+    const key = e.currentTarget.dataset.key
+    const value = (e.detail.value || '').trim()
+    if (!['A', 'B', 'C', 'D'].includes(key)) return
+    this.setData({ [`pacerInputs.${key}`]: value })
   },
 
   async onGenerate() {
@@ -113,7 +211,9 @@ Page({
     this.debugLog('version', { debugVersion: DEBUG_VERSION })
 
     try {
-      const parsed = parseJielong(text)
+      const parsed = parseJielong(text, {
+        manualPacers: this.data.pacerInputs
+      })
       if (!parsed.total) {
         wx.showToast({ title: '未识别到有效成员', icon: 'none' })
         this.setData({ loading: false })
@@ -186,13 +286,264 @@ Page({
         imageUrl,
         composedImageUrl,
         artifactPaths,
-        loading: false
+        loading: false,
+        attendanceResult: this.buildAttendanceResult(parsed)
       })
+
+      this.showManualPacerMissTip(parsed)
     } catch (err) {
       console.error(err)
       wx.showToast({ title: '生成失败：' + err.message, icon: 'none' })
       this.setData({ loading: false })
     }
+  },
+
+  buildAttendanceResult(parsed) {
+    return buildAttendanceRows(this.getMemberRoster(), parsed, this.data.activityDate)
+  },
+
+  onGenerateAttendance() {
+    const text = this.data.inputText.trim()
+    if (!text) {
+      wx.showToast({ title: '请先粘贴接龙内容', icon: 'none' })
+      return
+    }
+
+    const parsed = parseJielong(text, {
+      manualPacers: this.data.pacerInputs
+    })
+    if (!parsed.total) {
+      wx.showToast({ title: '未识别到有效成员', icon: 'none' })
+      return
+    }
+
+    const attendanceResult = this.buildAttendanceResult(parsed)
+    this.setData({ parsed, attendanceResult })
+
+    wx.showToast({
+      title: `统计完成 ${attendanceResult.attendedCount}/${attendanceResult.rows.length}`,
+      icon: 'none'
+    })
+  },
+
+  getHistoryRecords() {
+    try {
+      const records = wx.getStorageSync(ATTENDANCE_HISTORY_KEY)
+      return Array.isArray(records) ? records : []
+    } catch (e) {
+      return []
+    }
+  },
+
+  saveHistoryRecord(result) {
+    if (!result || !result.date || !Array.isArray(result.rows)) return
+
+    const attendedMap = {}
+    result.rows.forEach(row => {
+      attendedMap[row.memberName] = !!row.attended
+    })
+
+    const records = this.getHistoryRecords().filter(r => r && r.date !== result.date)
+    records.push({ date: result.date, attendedMap })
+    records.sort((a, b) => String(a.date).localeCompare(String(b.date)))
+    wx.setStorageSync(ATTENDANCE_HISTORY_KEY, records)
+    this.setData({ historyCount: records.length })
+  },
+
+  async onExportActivityCsv() {
+    let result = this.data.attendanceResult
+    if (!result) {
+      const text = this.data.inputText.trim()
+      if (!text) {
+        wx.showToast({ title: '请先粘贴接龙内容', icon: 'none' })
+        return
+      }
+      const parsed = parseJielong(text, { manualPacers: this.data.pacerInputs })
+      if (!parsed.total) {
+        wx.showToast({ title: '未识别到有效成员', icon: 'none' })
+        return
+      }
+      result = buildAttendanceRows(this.getMemberRoster(), parsed, this.data.activityDate)
+      this.setData({ parsed, attendanceResult: result })
+    }
+
+    if (!result || !result.rows || !result.rows.length) {
+      wx.showToast({ title: '没有可导出的数据', icon: 'none' })
+      return
+    }
+
+    const dateText = normalizeDate(result.date || this.data.activityDate)
+    const isIOS = this.isIOSPlatform()
+    const fileName = isIOS
+      ? `attendance_${dateText || this.getTodayDateText()}.xls`
+      : `attendance_${dateText || this.getTodayDateText()}.csv`
+    const content = isIOS ? buildActivityExcelHtml(result) : buildActivityCsv(result)
+    try {
+      const filePath = await this.writeTableAndOpen(fileName, content)
+      this.saveHistoryRecord(result)
+      wx.showToast({ title: isIOS ? '已导出Excel兼容文件' : '已导出并打开文件', icon: 'success' })
+      this.debugLog('attendance-export', {
+        filePath,
+        rows: result.rows.length,
+        exportType: isIOS ? 'xls-html' : 'csv'
+      })
+    } catch (err) {
+      wx.showToast({ title: '导出失败：' + (err.message || err), icon: 'none', duration: 2500 })
+    }
+  },
+
+  async onExportMergedCsv() {
+    const historyRecords = this.getHistoryRecords()
+    if (!historyRecords.length) {
+      wx.showToast({ title: '暂无历史记录，请先导出一次签到表', icon: 'none' })
+      return
+    }
+
+    const roster = this.getMemberRoster()
+    const isIOS = this.isIOSPlatform()
+    const content = isIOS
+      ? buildMergedExcelHtml(roster, historyRecords)
+      : buildMergedCsv(roster, historyRecords)
+    const fileName = isIOS
+      ? `attendance_merged_${this.getTodayDateText()}.xls`
+      : `attendance_merged_${this.getTodayDateText()}.csv`
+    try {
+      const filePath = await this.writeTableAndOpen(fileName, content)
+      wx.showToast({ title: isIOS ? '总表已导出为Excel兼容文件' : '总表已导出并打开', icon: 'success' })
+      this.debugLog('attendance-export-merged', {
+        filePath,
+        records: historyRecords.length,
+        members: roster.length,
+        exportType: isIOS ? 'xls-html' : 'csv'
+      })
+    } catch (err) {
+      wx.showToast({ title: '导出失败：' + (err.message || err), icon: 'none', duration: 2500 })
+    }
+  },
+
+  isIOSPlatform() {
+    try {
+      const info = wx.getSystemInfoSync ? wx.getSystemInfoSync() : {}
+      return String(info.platform || '').toLowerCase() === 'ios'
+    } catch (e) {
+      return false
+    }
+  },
+
+  ensureExportDir() {
+    return new Promise((resolve, reject) => {
+      const fs = wx.getFileSystemManager()
+      fs.mkdir({
+        dirPath: EXPORT_TMP_DIR,
+        recursive: true,
+        success: () => resolve(EXPORT_TMP_DIR),
+        fail: err => {
+          if (err && err.errMsg && err.errMsg.includes('file already exists')) {
+            resolve(EXPORT_TMP_DIR)
+            return
+          }
+          reject(new Error('创建导出目录失败: ' + (err && err.errMsg)))
+        }
+      })
+    })
+  },
+
+  sanitizeFileName(fileName) {
+    return String(fileName || 'attendance.csv').replace(/[\\/:*?"<>|]/g, '_')
+  },
+
+  writeTableAndOpen(fileName, textContent) {
+    return this.ensureExportDir().then(() => new Promise((resolve, reject) => {
+      const fs = wx.getFileSystemManager()
+      const safeName = this.sanitizeFileName(fileName)
+      const target = `${EXPORT_TMP_DIR}/${safeName}`
+      const content = `\ufeff${textContent}`
+
+      fs.writeFile({
+        filePath: target,
+        data: content,
+        encoding: 'utf8',
+        success: async () => {
+          try {
+            await this.openDocumentWithFallback(target)
+          } catch (err) {
+            const msg = err && err.message ? err.message : String(err)
+            wx.showModal({
+              title: '文件已导出',
+              content: msg,
+              showCancel: false
+            })
+          }
+          resolve(target)
+        },
+        fail: err => reject(new Error('writeFile失败: ' + (err && err.errMsg)))
+      })
+    }))
+  },
+
+  openSingleDocument(filePath, fileType) {
+    return new Promise((resolve, reject) => {
+      const options = {
+        filePath,
+        showMenu: true,
+        success: () => resolve(filePath),
+        fail: err => reject(err)
+      }
+      if (fileType) options.fileType = fileType
+      wx.openDocument(options)
+    })
+  },
+
+  async openDocumentWithFallback(filePath) {
+    const isXls = /\.xls$/i.test(filePath)
+    const attempts = isXls
+      ? [
+          { fileType: 'xls', label: 'xls' },
+          { fileType: '', label: 'auto' }
+        ]
+      : [
+          { fileType: 'csv', label: 'csv' },
+          { fileType: '', label: 'auto' },
+          { fileType: 'xls', label: 'xls' }
+        ]
+
+    let lastErr = null
+    for (const item of attempts) {
+      try {
+        await this.openSingleDocument(filePath, item.fileType)
+        this.debugLog('open-doc-success', { filePath, mode: item.label })
+        return filePath
+      } catch (err) {
+        lastErr = err
+        this.debugLog('open-doc-failed', {
+          filePath,
+          mode: item.label,
+          message: err && err.errMsg ? err.errMsg : String(err)
+        })
+      }
+    }
+
+    const info = wx.getSystemInfoSync ? wx.getSystemInfoSync() : {}
+    const platform = info.platform || 'unknown'
+    const errMsg = lastErr && lastErr.errMsg ? lastErr.errMsg : String(lastErr || 'unknown')
+
+    if (platform === 'devtools') {
+      throw new Error('文件已导出，但开发者工具可能不支持预览该文件；请在手机微信中打开。详细: ' + errMsg)
+    }
+
+    throw new Error('文件已导出，但当前设备无法直接打开，请在微信“最近文件”或WPS/Excel中打开。详细: ' + errMsg)
+  },
+
+  showManualPacerMissTip(parsed) {
+    const misses = (parsed && parsed.manualPacerMisses) || []
+    if (!misses.length) return
+
+    const lines = misses.map(m => `${m.groupLabel}: ${m.inputName}`)
+    wx.showModal({
+      title: '手动配速员未命中',
+      content: `以下手动填写的配速员未在对应组成员中匹配到：\n${lines.join('\n')}`,
+      showCancel: false
+    })
   },
 
   getCandidateServers(currentServer) {
@@ -356,10 +707,11 @@ Page({
     const canvasWidth = baseInfo.width
     const canvasHeight = baseInfo.height
     const legendLines = Array.isArray(options.legendLines) ? options.legendLines : []
+    const legendExtraLines = 2
 
     const margin = Math.max(16, Math.round(canvasWidth * 0.03))
     const maxLogoWidth = Math.round(canvasWidth * 0.18)
-    const logoWidth = Math.max(1, Math.round(Math.min(maxLogoWidth, logoInfo.width) * 0.7))
+    const logoWidth = Math.max(1, Math.round(Math.min(maxLogoWidth, logoInfo.width) * 0.92))
     const logoHeight = Math.round((logoInfo.height / logoInfo.width) * logoWidth)
     const legendFontSize = Math.max(12, Math.round(canvasWidth * 0.018))
     const legendLineHeight = Math.max(16, Math.round(legendFontSize * 1.45))
@@ -384,7 +736,7 @@ Page({
       )
       : 0
     const legendHeight = legendLines.length
-      ? (legendPad * 2 + legendLines.length * legendLineHeight + legendExtraPadY)
+      ? (legendPad * 2 + (legendLines.length + legendExtraLines) * legendLineHeight + legendExtraPadY)
       : 0
 
     const panelWidth = Math.max(logoWidth + panelPad * 2, legendWidth)
@@ -392,9 +744,9 @@ Page({
       ? (logoHeight + legendGap + legendOffsetY + legendHeight + panelPad * 2)
       : (logoHeight + panelPad * 2)
 
-    const panelLogoX = panelPad
+    const panelLogoX = Math.max(panelPad, Math.round((panelWidth - logoWidth) / 2))
     const panelLogoY = panelPad
-    const legendX = 0
+    const legendX = Math.max(0, Math.round((panelWidth - legendWidth) / 2))
     const legendY = panelPad + logoHeight + legendGap + legendOffsetY
 
     let legendPath = ''
@@ -417,45 +769,46 @@ Page({
       legendPath = await this.writeTmpArtifact(legendTemp, 'legend.png')
     }
 
-    const panelTemp = await this.renderCanvas(panelWidth, panelHeight, async (canvas, ctx) => {
-      const logoImg = await this.loadCanvasImage(canvas, logoPath)
-      let legendImg = null
-      if (legendPath) {
-        legendImg = await this.loadCanvasImage(canvas, legendPath)
-      }
-
-      if (legendImg) {
-        ctx.drawImage(legendImg, legendX, legendY, legendWidth, legendHeight)
-      }
-
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.88)'
-      ctx.fillRect(
-        panelLogoX - panelPad,
-        panelLogoY - panelPad,
-        logoWidth + panelPad * 2,
-        logoHeight + panelPad * 2
-      )
-      ctx.drawImage(logoImg, panelLogoX, panelLogoY, logoWidth, logoHeight)
-    })
-
-    const panelPath = await this.writeTmpArtifact(panelTemp, 'panel.png')
     const wbsPath = await this.writeTmpArtifact(basePath, 'wbs.png')
 
     // 最终图采用左右排布，避免 panel 覆盖 WBS：左侧 panel，右侧原始 WBS
     const finalCanvasWidth = canvasWidth + panelWidth + margin
-    const finalCanvasHeight = canvasHeight
+    const finalCanvasHeight = Math.max(canvasHeight, panelHeight)
     const wbsX = panelWidth + margin
     const panelX = 0
     const panelY = 0
 
     const finalTemp = await this.renderCanvas(finalCanvasWidth, finalCanvasHeight, async (canvas, ctx) => {
       const baseImg = await this.loadCanvasImage(canvas, basePath)
-      const panelImg = await this.loadCanvasImage(canvas, panelPath)
+      const logoImg = await this.loadCanvasImage(canvas, logoPath)
+      let legendImg = null
+      if (legendPath) {
+        legendImg = await this.loadCanvasImage(canvas, legendPath)
+      }
+
+      ctx.imageSmoothingEnabled = true
+      if (typeof ctx.imageSmoothingQuality !== 'undefined') {
+        ctx.imageSmoothingQuality = 'high'
+      }
+
       ctx.drawImage(baseImg, wbsX, 0, canvasWidth, canvasHeight)
-      ctx.drawImage(panelImg, panelX, panelY, panelWidth, panelHeight)
+
+      if (legendImg) {
+        ctx.drawImage(legendImg, panelX + legendX, panelY + legendY, legendWidth, legendHeight)
+      }
+
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.88)'
+      ctx.fillRect(
+        panelX + panelLogoX - panelPad,
+        panelY + panelLogoY - panelPad,
+        logoWidth + panelPad * 2,
+        logoHeight + panelPad * 2
+      )
+      ctx.drawImage(logoImg, panelX + panelLogoX, panelY + panelLogoY, logoWidth, logoHeight)
     })
 
     const finalPath = await this.writeTmpArtifact(finalTemp, 'final.png')
+  const panelPath = ''
     this._lastComposeDebug = {
       canvasWidth,
       canvasHeight,
@@ -492,18 +845,20 @@ Page({
           try {
             const canvas = qRes[0].node
             const ctx = canvas.getContext('2d')
-            canvas.width = width
-            canvas.height = height
+            const dpr = wx.getSystemInfoSync().pixelRatio || 1
+            canvas.width = width * dpr
+            canvas.height = height * dpr
+            ctx.scale(dpr, dpr)
             ctx.clearRect(0, 0, width, height)
 
             await drawFn(canvas, ctx)
 
             wx.canvasToTempFilePath({
               canvas,
-              width,
-              height,
-              destWidth: width,
-              destHeight: height,
+              width: width * dpr,
+              height: height * dpr,
+              destWidth: width * dpr,
+              destHeight: height * dpr,
               fileType: 'png',
               quality: 1,
               success: res => resolve(res.tempFilePath),

@@ -29,6 +29,69 @@
     </view>
   </view>
 
+  <view class="card">
+    <view class="card-title">
+      <text>📅 出勤统计</text>
+      <text class="hint">名单 {{memberCount}} 人 · 来源 {{rosterSource === 'txt' ? 'txt' : '内置'}} · {{historyCount}} 次历史</text>
+    </view>
+    <view class="date-row">
+      <text class="date-label">活动日期</text>
+      <picker mode="date" value="{{activityDate}}" bindchange="onDateChange">
+        <view class="date-value">{{activityDate || '请选择日期'}}</view>
+      </picker>
+    </view>
+    <view class="btn-row">
+      <button class="btn primary" size="mini" bindtap="onGenerateAttendance">生成出勤表</button>
+      <button class="btn ghost" size="mini" bindtap="onExportActivityCsv">导出本次CSV</button>
+      <button class="btn ghost" size="mini" bindtap="onExportMergedCsv">导出累计总表</button>
+    </view>
+    <view class="hint-block">
+      <text>说明：CSV可直接用 Excel/WPS 打开；导出本次时会自动写入“本机历史”，可再导出累计总表。</text>
+    </view>
+  </view>
+
+  <view class="card" wx:if="{{attendanceResult}}">
+    <view class="card-title">
+      <text>✅ 全员出勤预览</text>
+      <text class="hint">出席 {{attendanceResult.attendedCount}} / {{attendanceResult.rows.length}}</text>
+    </view>
+    <view class="attendance-head">
+      <text class="attendance-date">活动日：{{attendanceResult.date}}</text>
+      <text class="attendance-absent">缺席：{{attendanceResult.absentCount}}</text>
+    </view>
+    <view class="attendance-list">
+      <view class="attendance-item" wx:for="{{attendanceResult.rows}}" wx:key="memberName">
+        <text class="attendance-name">{{item.memberName}}</text>
+        <text class="{{item.attended ? 'attendance-tag present' : 'attendance-tag absent'}}">{{item.attended ? '出席' : '缺席'}}</text>
+      </view>
+    </view>
+    <view class="unmatched-box" wx:if="{{attendanceResult.unmatchedSignupNames.length}}">
+      <text class="unmatched-title">未匹配报名昵称（请核对别名）：</text>
+      <text class="unmatched-text">{{attendanceResult.unmatchedText}}</text>
+    </view>
+  </view>
+
+  <view class="card">
+    <view class="card-title">
+      <text>🎯 手动指定配速员</text>
+      <text class="hint">留空则按接龙“配速员”标注</text>
+    </view>
+    <view class="pacer-grid">
+      <view class="pacer-item" wx:for="{{['A','B','C','D']}}" wx:key="*this">
+        <text class="pacer-label">{{item}}组</text>
+        <input
+          class="pacer-input"
+          type="text"
+          maxlength="20"
+          placeholder="输入{{item}}组配速员昵称"
+          value="{{pacerInputs[item]}}"
+          data-key="{{item}}"
+          bindinput="onPacerInput"
+        />
+      </view>
+    </view>
+  </view>
+
   <view class="card" wx:if="{{parsed}}">
     <view class="card-title">
       <text>📊 分组预览</text>
@@ -41,7 +104,7 @@
           <text class="group-count">{{item.members.length}}人</text>
         </view>
         <view class="members">
-          <text class="member" wx:for="{{item.members}}" wx:for-item="m" wx:key="name">{{m.name}}</text>
+          <text class="{{'member ' + (m.isPacer ? 'member-pacer' : '')}}" wx:for="{{item.members}}" wx:for-item="m" wx:key="name">{{m.name}}{{m.isPacer ? ' [PACER]' : ''}}</text>
         </view>
       </view>
     </view>

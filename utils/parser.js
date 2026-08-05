@@ -33,13 +33,35 @@ const UNKNOWN_GROUP_KEY = '__unknown__'
 const FALLBACK_GROUP_KEY = 'slow'
 const FOLLOW_PENDING = '__follow__'   // 待解析占位符
 const LEGEND_MAX_CJK_WIDTH = 20
+const PACER_GROUP_KEYS = ['A', 'B', 'C', 'D']
 
 function isMemberLine(line) {
-  return /^\s*\d+\s*[\.、\)．]/.test(line)
+  // Avoid matching decimal schedule lines like "1.2公里配速..."
+  return /^\s*\d+\s*[\.、\)．](?!\d)/.test(line)
 }
 
 function normalizeTitleLine(line) {
   return cleanName(String(line || '').replace(/^[#＃]+\s*/, '').trim())
+}
+
+function extractPacerNameFromGroupDesc(desc) {
+  const text = cleanName(String(desc || ''))
+  if (!text) return ''
+
+  // 兼容：配速员冯斌 / 配速员: 冯斌 / 配速员（冯斌）
+  const patterns = [
+    /配速员[：:]?\s*([\u4e00-\u9fa5A-Za-z0-9_\-]{1,16})/,
+    /配速员[（(]\s*([^）)\s]{1,16})\s*[）)]/
+  ]
+
+  for (const re of patterns) {
+    const m = text.match(re)
+    if (!m || !m[1]) continue
+    const name = cleanName(m[1])
+    if (name) return name
+  }
+
+  return ''
 }
 
 /**
@@ -59,7 +81,8 @@ function extractHeaderMeta(lines) {
       headerTitle: '',
       introLines: [],
       introText: '',
-      groupBriefs: []
+      groupBriefs: [],
+      headerPacerByGroup: {}
     }
   }
 
@@ -67,6 +90,7 @@ function extractHeaderMeta(lines) {
   const introLines = []
   const groupBriefMap = {}
   const groupBriefOrder = []
+  const headerPacerByGroup = {}
   let currentGroupKey = null
 
   const pushGroupBrief = (key, desc) => {
@@ -94,7 +118,12 @@ function extractHeaderMeta(lines) {
     const groupMatch = line.match(/^([A-Da-d])\s*组?\s*(?:[：:\-]\s*)?(.+)$/)
     if (groupMatch) {
       currentGroupKey = groupMatch[1].toUpperCase()
-      pushGroupBrief(currentGroupKey, groupMatch[2])
+      const desc = groupMatch[2]
+      const pacerName = extractPacerNameFromGroupDesc(desc)
+      if (pacerName && !headerPacerByGroup[currentGroupKey]) {
+        headerPacerByGroup[currentGroupKey] = pacerName
+      }
+      pushGroupBrief(currentGroupKey, desc)
       continue
     }
 
@@ -127,7 +156,8 @@ function extractHeaderMeta(lines) {
     headerTitle,
     introLines,
     introText: introLines.join('；'),
-    groupBriefs
+    groupBriefs,
+    headerPacerByGroup
   }
 }
 
@@ -201,6 +231,27 @@ function cleanName(s) {
     .trim()
 }
 
+function cleanPacerTagText(s) {
+  return String(s || '')
+    .replace(/[\(（\[]?\s*配速员\s*[\)）\]]?/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function normalizeCompareName(name) {
+  return String(name || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[\s\-—_·.。\(\)（）\[\]【】]/g, '')
+}
+
+function isSameOrSimilarName(a, b) {
+  const aKey = normalizeCompareName(a)
+  const bKey = normalizeCompareName(b)
+  if (!aKey || !bKey) return false
+  return aKey === bKey || aKey.includes(bKey) || bKey.includes(aKey)
+}
+
 /**
  * 解析单行接龙，返回 null 表示跳过
  */
@@ -209,10 +260,11 @@ function parseLine(rawLine) {
   if (!line) return null
 
   // 去掉序号前缀：1. / 1、/ 1) / 1．
-  const m = line.match(/^\s*(\d+)\s*[\.、\)．]\s*(.+)$/)
+  const m = line.match(/^\s*(\d+)\s*[\.、\)．](?!\d)\s*(.+)$/)
   if (!m) return null
 
   const content = m[2].trim()
+  const hasPacerTag = /配速员/.test(content)
 
   // 切分昵称与备注
   let name = content
@@ -245,13 +297,17 @@ function parseLine(rawLine) {
     .trim()
   if (!noteStripped) note = ''
 
+  const cleanedName = cleanName(cleanPacerTagText(name)) || cleanName(name) || name
+  const cleanedNote = cleanName(cleanPacerTagText(note))
+
   return {
     index: parseInt(m[1], 10),
-    name: cleanName(name) || name,
-    note: cleanName(note),
+    name: cleanedName,
+    note: cleanedNote,
     groupKey,
     groupLabel: GROUP_KEY_MAP[groupKey] || (groupKey === FOLLOW_PENDING ? FOLLOW_PENDING : GROUP_KEY_MAP[FALLBACK_GROUP_KEY]),
-    followRef   // 被跟随者的名字片段（待第二阶段解析）
+    followRef,  // 被跟随者的名字片段（待第二阶段解析）
+    selfMarkedPacer: hasPacerTag
   }
 }
 
@@ -337,6 +393,33 @@ function parseJielong(text, options = {}) {
     }
   }
 
+  const manualPacers = options.manualPacers || {}
+  const headerPacerByGroup = headerMeta.headerPacerByGroup || {}
+  const pacerCandidatesByGroup = {}
+  const manualPacerInputByGroup = {}
+  const manualPacerMisses = []
+  for (const key of PACER_GROUP_KEYS) {
+    const manualName = String(manualPacers[key] || '').trim()
+    manualPacerInputByGroup[key] = manualName
+    const candidates = []
+
+    if (manualName) {
+      candidates.push(manualName)
+      pacerCandidatesByGroup[key] = candidates
+      continue
+    }
+
+    const headerPacerName = String(headerPacerByGroup[key] || '').trim()
+    if (headerPacerName) {
+      candidates.push(headerPacerName)
+    }
+
+    const autoPacer = parsed.find(p => p.groupKey === key && p.selfMarkedPacer)
+    if (autoPacer) candidates.push(autoPacer.name)
+
+    pacerCandidatesByGroup[key] = candidates
+  }
+
   // ── 聚合分组 ──────────────────────────────────────────────────────────
   const groupOrder = []
   const groupMap = {}
@@ -347,12 +430,55 @@ function parseJielong(text, options = {}) {
       groupMap[key] = { key, label, members: [] }
       groupOrder.push(key)
     }
-    groupMap[key].members.push({ name: item.name, note: item.note })
+    groupMap[key].members.push({ name: item.name, note: item.note, isPacer: false })
   }
 
   // 排序：A B C D 慢跑
   const orderRank = { A: 1, B: 2, C: 3, D: 4, slow: 5 }
   groupOrder.sort((a, b) => (orderRank[a] || 99) - (orderRank[b] || 99))
+
+  for (const key of groupOrder) {
+    const group = groupMap[key]
+    const pacerCandidates = pacerCandidatesByGroup[key] || []
+    if (!group || !pacerCandidates.length || !Array.isArray(group.members) || !group.members.length) continue
+
+    const expandedCandidates = []
+    const addCandidate = (name) => {
+      const v = String(name || '').trim()
+      if (v && !expandedCandidates.includes(v)) expandedCandidates.push(v)
+    }
+
+    for (const candidate of pacerCandidates) {
+      addCandidate(candidate)
+      addCandidate(aliasToCanonical[candidate])
+    }
+
+    let pacerIndex = -1
+    for (const pacerName of expandedCandidates) {
+      pacerIndex = group.members.findIndex(m => isSameOrSimilarName(m.name, pacerName))
+      if (pacerIndex >= 0) break
+    }
+
+    if (pacerIndex < 0) {
+      if (manualPacerInputByGroup[key]) {
+        manualPacerMisses.push({
+          groupKey: key,
+          groupLabel: GROUP_KEY_MAP[key] || `${key}组`,
+          inputName: manualPacerInputByGroup[key]
+        })
+      }
+      continue
+    }
+
+    const pacerMember = group.members[pacerIndex]
+    group.members.forEach(m => { m.isPacer = false })
+    pacerMember.isPacer = true
+
+    if (pacerIndex > 0) {
+      group.members.splice(pacerIndex, 1)
+      group.members.unshift(pacerMember)
+    }
+  }
 
   const groups = groupOrder.map(k => groupMap[k])
 
@@ -362,7 +488,8 @@ function parseJielong(text, options = {}) {
     total: parsed.length,
     introText: headerMeta.introText,
     introLines: headerMeta.introLines,
-    groupBriefs: headerMeta.groupBriefs
+    groupBriefs: headerMeta.groupBriefs,
+    manualPacerMisses
   }
 }
 
@@ -378,6 +505,7 @@ function toWBS(parsed, options = {}) {
   lines.push('  .slow   { BackgroundColor #7f8c8d; FontColor white;   FontSize 14; }')
   lines.push('  .other  { BackgroundColor #bdc3c7; FontColor #2c3e50; FontSize 14; }')
   lines.push('  .member { BackgroundColor #ecf0f1; FontColor #2c3e50; FontSize 12; }')
+  lines.push('  .pacer  { BackgroundColor #f7dc6f; FontColor #2c3e50; FontSize 12; FontStyle bold; }')
   lines.push('}')
   lines.push('</style>')
 
@@ -388,8 +516,10 @@ function toWBS(parsed, options = {}) {
     const style = g.key === 'slow' ? 'slow' : 'group'
     lines.push(`** ${escapeText(g.label)} (${g.members.length}人) <<${style}>>`)
     for (const m of g.members) {
-      const display = m.note ? `${escapeText(m.name)}\\n${escapeText(m.note)}` : escapeText(m.name)
-      lines.push(`*** ${display} <<member>>`)
+      const displayName = m.isPacer ? `${m.name} [PACER]` : m.name
+      const display = m.note ? `${escapeText(displayName)}\\n${escapeText(m.note)}` : escapeText(displayName)
+      const memberStyle = m.isPacer ? 'pacer' : 'member'
+      lines.push(`*** ${display} <<${memberStyle}>>`)
     }
   }
 
