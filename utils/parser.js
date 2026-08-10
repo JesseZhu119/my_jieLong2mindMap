@@ -23,6 +23,7 @@ const GROUP_RULES = [
   { key: 'B',    label: 'B组' },
   { key: 'C',    label: 'C组' },
   { key: 'D',    label: 'D组' },
+  { key: 'E',    label: 'E组' },
   { key: 'slow', label: '慢跑组' }
 ]
 
@@ -33,7 +34,7 @@ const UNKNOWN_GROUP_KEY = '__unknown__'
 const FALLBACK_GROUP_KEY = 'slow'
 const FOLLOW_PENDING = '__follow__'   // 待解析占位符
 const LEGEND_MAX_CJK_WIDTH = 20
-const PACER_GROUP_KEYS = ['A', 'B', 'C', 'D']
+const PACER_GROUP_KEYS = ['A', 'B', 'C', 'D', 'E']
 
 function isMemberLine(line) {
   // Avoid matching decimal schedule lines like "1.2公里配速..."
@@ -115,7 +116,7 @@ function extractHeaderMeta(lines) {
     }
 
     // 兼容多种写法：A组 8公里... / A组:8公里... / A 8公里... / A组8公里...
-    const groupMatch = line.match(/^([A-Da-d])\s*组?\s*(?:[：:\-]\s*)?(.+)$/)
+    const groupMatch = line.match(/^([A-Ea-e])\s*组?\s*(?:[：:\-]\s*)?(.+)$/)
     if (groupMatch) {
       currentGroupKey = groupMatch[1].toUpperCase()
       const desc = groupMatch[2]
@@ -134,7 +135,7 @@ function extractHeaderMeta(lines) {
     }
 
     // 紧跟在分组行后的非空行视作该组补充说明（如 400 米配速）
-    if (currentGroupKey && !/^([A-Da-d])\s*组?/.test(line)) {
+    if (currentGroupKey && !/^([A-Ea-e])\s*组?/.test(line)) {
       pushGroupBrief(currentGroupKey, line)
       continue
     }
@@ -143,7 +144,7 @@ function extractHeaderMeta(lines) {
     introLines.push(line)
   }
 
-  const rank = { A: 1, B: 2, C: 3, D: 4, slow: 5 }
+  const rank = { A: 1, B: 2, C: 3, D: 4, E: 5, slow: 6 }
   groupBriefOrder.sort((a, b) => (rank[a] || 99) - (rank[b] || 99))
 
   const groupBriefs = groupBriefOrder.map(key => ({
@@ -172,7 +173,7 @@ function detectGroup(content) {
 
   // 2. 精确单字母 + "组" 可选：A组 / A 组 / A
   //    用边界判断，防止误匹配 "starl-魏"
-  for (const key of ['A', 'B', 'C', 'D']) {
+  for (const key of ['A', 'B', 'C', 'D', 'E']) {
     // 单独的 X 或 X组（X 前后不是其他字母）
     if (new RegExp('(?<![A-Z])' + key + '{1}(?:组)?(?![A-Z])', 'i').test(s)) {
       return key
@@ -196,11 +197,11 @@ function fuzzyDetectGroup(content) {
   const s = content.toUpperCase()
 
   // 2. 重复字母：DD / DDD / Ddd → D
-  const repeatMatch = s.match(/(?<![A-Z])([A-D])\1+(?![A-Z])/)
+  const repeatMatch = s.match(/(?<![A-Z])([A-E])\1+(?![A-Z])/)
   if (repeatMatch) return repeatMatch[1]
 
   // 3. 范围写法取首字母：A→C / A-C / A~C / A—C / A to C
-  const rangeMatch = s.match(/(?<![A-Z])([A-D])[\s]*(?:→|->|—|-|~|TO)[\s]*[A-D](?![A-Z])/)
+  const rangeMatch = s.match(/(?<![A-Z])([A-E])[\s]*(?:→|->|—|-|~|TO)[\s]*[A-E](?![A-Z])/)
   if (rangeMatch) return rangeMatch[1]
 
   // 4. 慢跑/放松/轻松 (重复保险)
@@ -287,12 +288,12 @@ function parseLine(rawLine) {
 
   // 清理备注中的纯分组标记
   const noteStripped = note
-    .replace(/^[A-Da-d]{1,3}\s*组?$/, '')
+    .replace(/^[A-Ea-e]{1,3}\s*组?$/, '')
     .replace(/^慢跑$|^放松$|^轻松$/, '')
-    .replace(/^[A-Da-d]\s*[\-—→~to]+\s*[A-Da-d]\s*组?$/i, '')
+    .replace(/^[A-Ea-e]\s*[\-—→~to]+\s*[A-Ea-e]\s*组?$/i, '')
     .trim()
   note = note
-    .replace(/^[A-Da-d]{1,3}\s*组?\s*/i, '')
+    .replace(/^[A-Ea-e]{1,3}\s*组?\s*/i, '')
     .replace(/^慢跑\s*|^放松\s*|^轻松\s*/, '')
     .trim()
   if (!noteStripped) note = ''
@@ -434,7 +435,7 @@ function parseJielong(text, options = {}) {
   }
 
   // 排序：A B C D 慢跑
-  const orderRank = { A: 1, B: 2, C: 3, D: 4, slow: 5 }
+  const orderRank = { A: 1, B: 2, C: 3, D: 4, E: 5, slow: 6 }
   groupOrder.sort((a, b) => (orderRank[a] || 99) - (orderRank[b] || 99))
 
   for (const key of groupOrder) {
