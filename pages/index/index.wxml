@@ -77,7 +77,7 @@
       <text class="hint">留空则按接龙“配速员”标注</text>
     </view>
     <view class="pacer-grid">
-      <view class="pacer-item" wx:for="{{['A','B','C','D']}}" wx:key="*this">
+      <view class="pacer-item" wx:for="{{['A','B','C','D','E']}}" wx:key="*this">
         <text class="pacer-label">{{item}}组</text>
         <input
           class="pacer-input"
